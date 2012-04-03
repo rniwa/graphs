@@ -22,10 +22,8 @@ var GraphCommon = (function() {
     return {
         displayDays: args['displayrange'] ? args['displayrange'] : 7,
         datatype: args['datatype'] ? args['datatype'] : 'running',
-        zoomXFrom: null,
-        zoomXTo: null,
-        zoomYFrom: null,
-        zoomYTo: null,
+        zoomFrom: null,
+        zoomTo: null,
         plot: null,
         overview: null,
         ajaxSeries: null,
@@ -44,10 +42,8 @@ GraphCommon.displayDaysInMicroseconds = function() {
 };
 
 GraphCommon.clearZoom = function() {
-    this.zoomXFrom = null;
-    this.zoomXTo = null;
-    this.zoomYFrom = null;
-    this.zoomYTo = null;
+    this.zoomFrom = null;
+    this.zoomTo = null;
 };
 
 function debug(message)
@@ -185,8 +181,6 @@ GraphCommon.convertData = function(testName, branchName, platformName, data,
                                     this.displayDaysInMicroseconds();
     gdata.minT = new Date().getTime() - displayDaysInMicroseconds;
     gdata.maxT = new Date().getTime();
-    gdata.minV = data['min'];
-    gdata.maxV = data['max'];
 
     minT = gdata.minT;
     maxT = gdata.maxT;
@@ -343,39 +337,43 @@ GraphCommon.deltaPlot = function(plot)
     return plot;
 };
 
-GraphCommon.getZoomXRange = function()
+GraphCommon.getZoomRange = function()
 {
     return {
-        from: GraphCommon.zoomXFrom || GraphCommon.ajaxSeries.minT,
-        to: GraphCommon.zoomXTo || GraphCommon.ajaxSeries.maxT
+        from: GraphCommon.zoomFrom || GraphCommon.ajaxSeries.minT,
+        to: GraphCommon.zoomTo || GraphCommon.ajaxSeries.maxT
     };
 };
 
-GraphCommon.zoomIn = function()
+GraphCommon.getPlotRange = function()
 {
     var sel = this.plot.getSelection();
-    var xRange;
-    var yRange;
+    var range;
 
     if (sel && sel.xaxis) {
-        xRange = sel.xaxis;
-        yRange = sel.yaxis;
+        range = sel.xaxis;
         this.plot.clearSelection(true);
     } else {
-        var oldRange = this.getZoomXRange();
-        xRange = {
+        var oldRange = this.getZoomRange();
+        range = {
             from: oldRange.from + (oldRange.to - oldRange.from) / 4,
             to: oldRange.from + 3 * (oldRange.to - oldRange.from) / 4
         };
     }
 
-    this.zoomToRange(xRange, yRange);
+    return range;
+};
+
+GraphCommon.zoomIn = function()
+{
+    var range = this.getPlotRange();
+    this.zoomToRange(range);
     updateLocation();
 };
 
 GraphCommon.zoomOut = function()
 {
-    var oldRange = this.getZoomXRange();
+    var oldRange = this.getZoomRange();
 
     var range = {
         from: oldRange.from - (oldRange.to - oldRange.from) / 2,
@@ -396,28 +394,19 @@ GraphCommon.zoomOut = function()
     updateLocation();
 };
 
-GraphCommon.zoomToRange = function(xRange, yRange)
+GraphCommon.zoomToRange = function(range)
 {
-    this.zoomXFrom = (xRange && xRange.from) || this.ajaxSeries.minT;
-    this.zoomXTo = (xRange && xRange.to) || this.ajaxSeries.maxT;
-    this.zoomYFrom = yRange ? yRange.from : null;
-    this.zoomYTo = yRange ? yRange.to : null;
+    this.zoomFrom = (range && range.from) || this.ajaxSeries.minT;
+    this.zoomTo = (range && range.to) || this.ajaxSeries.maxT;
 
     this.unlockTooltip();
     this.hideTooltip(true);
     this.updatePlot();
 
-    var xAxisIsZoomed = this.ajaxSeries.minT < this.zoomXFrom ||
-                        this.zoomXTo < this.ajaxSeries.maxT;
-
-    if (xAxisIsZoomed) {
-        var yaxis = this.overview.getYAxes()[0];
-        var selection = { xaxis: { from: this.zoomXFrom, to: this.zoomXTo },
-                          yaxis: { from: yaxis.min, to: yaxis.max } };
-        if (this.zoomYFrom != null && this.zoomYTo != null) {
-            selection.yaxis = { from: this.zoomYFrom, to: this.zoomYTo };
-        }
-        this.overview.setSelection(selection, true);
+    if (this.ajaxSeries.minT < this.zoomFrom ||
+        this.zoomTo < this.ajaxSeries.maxT) {
+        this.overview.setSelection({xaxis: { from: this.zoomFrom,
+                                             to: this.zoomTo }}, true);
         var canZoomOut = true;
     } else {
         this.overview.clearSelection(true);
@@ -462,10 +451,8 @@ GraphCommon.onPlotClick = function(e, pos, item)
 
 GraphCommon.onPlotSelect = function(e, ranges)
 {
-    GraphCommon.zoomXFrom = ranges.xaxis.from;
-    GraphCommon.zoomXTo = ranges.xaxis.to;
-    GraphCommon.zoomYFrom = ranges.yaxis.from;
-    GraphCommon.zoomYTo = ranges.yaxis.to;
+    GraphCommon.zoomFrom = ranges.xaxis.from;
+    GraphCommon.zoomTo = ranges.xaxis.to;
 };
 
 GraphCommon.onPlotUnSelect = function(e, ranges)
@@ -476,13 +463,13 @@ GraphCommon.onPlotUnSelect = function(e, ranges)
 GraphCommon.onOverviewSelect = function(e, ranges)
 {
     GraphCommon.plot.clearSelection(true);
-    GraphCommon.zoomToRange(ranges.xaxis, ranges.yaxis);
+    GraphCommon.zoomToRange(ranges.xaxis);
     updateLocation();
 };
 
 GraphCommon.onOverviewUnselect = function(e)
 {
-    GraphCommon.zoomToRange();
+    GraphCommon.zoomToRange(null);
     GraphCommon.clearZoom();
     updateLocation();
 };
@@ -664,26 +651,17 @@ GraphCommon.updatePlot = function()
 
         count++;
 
-        minT = GraphCommon.zoomXFrom ||
+        minT = GraphCommon.zoomFrom ||
                (minT < series.minT ? minT : series.minT);
-        maxT = GraphCommon.zoomXTo ||
-               (maxT > series.maxT ? maxT : series.maxT);
+        maxT = GraphCommon.zoomTo || (maxT > series.maxT ? maxT : series.maxT);
 
         var xaxis = { xaxis: { min: minT, max: maxT } },
-            yaxis = { yaxis: { } };
-        if (GraphCommon.zoomYFrom != null && GraphCommon.zoomYTo != null) {
-            yaxis.yaxis = { min: GraphCommon.zoomYFrom,
-                            max: GraphCommon.zoomYTo };
-        }
+            yaxis = { yaxis: {} };
         var overview_xaxis = { xaxis: { min: new Date() - displayDays,
                                         max: new Date() } };
-        var overview_yaxis = { };
-        if (GraphCommon.datatype == 'running') {
-            overview_yaxis.yaxis = { min: 0 };
-        }
         plotOptions = $.extend(true, { }, PLOT_OPTIONS, xaxis, yaxis),
         overviewOptions = $.extend(true, { }, OVERVIEW_OPTIONS,
-                                   overview_xaxis, overview_yaxis);
+                                   overview_xaxis, yaxis);
     });
     this.unlockTooltip();
     this.hideTooltip(true);
@@ -715,11 +693,9 @@ function updateLocation() {
 
     var newLocation = url + '=' + JSON.stringify(args);
 
-    if (GraphCommon.zoomXFrom && GraphCommon.zoomXTo
-        && GraphCommon.zoomYFrom && GraphCommon.zoomYTo) {
-        newLocation += '&sel='
-                    + [GraphCommon.zoomXFrom, GraphCommon.zoomXTo,
-                       GraphCommon.zoomYFrom, GraphCommon.zoomYTo].join(',');
+    if (GraphCommon.zoomFrom && GraphCommon.zoomTo) {
+        newLocation += '&sel=' + GraphCommon.zoomFrom + ',' +
+                       GraphCommon.zoomTo;
     } else {
         newLocation += '&sel=none';
     }
@@ -727,16 +703,6 @@ function updateLocation() {
     newLocation += '&displayrange=' + $('#displayrange select').val();
     newLocation += '&datatype=' + $('#datatype select').val();
     window.location = newLocation;
-}
-
-function selToZoomRanges(sel) {
-    if (!sel)
-        return null;
-    sel = sel.split(',');
-    if (sel.length < 4)
-        return null;
-    return { xaxis: { from: parseInt(sel[0]), to: parseInt(sel[1]) },
-             yaxis: { from: parseInt(sel[2]), to: parseInt(sel[3]) }};
 }
 
 GraphCommon.iframeMarkupForEmbeddedChart = function(width, height, hash)
